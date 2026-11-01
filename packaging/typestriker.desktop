@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Type Striker
+Name[ja]=タイプストライカー
+GenericName=Typing Shooter
+Comment=Blast invaders by typing letters and words
+Comment[ja]=文字や単語を打って敵を倒すタイピングシューティング
+Exec=typestriker
+Icon=typestriker
+Terminal=false
+Categories=Game;ArcadeGame;Education;
+Keywords=typing;shooter;space;arcade;kids;
