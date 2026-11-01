@@ -198,7 +198,7 @@ class ProgressScene(BackdropScene):
 class HowToPlay(BackdropScene):
     @staticmethod
     def lines():
-        return [t("howto.1"), t("howto.2"), t("howto.3"), t("howto.4"), t("howto.5"), t("howto.6"), t("howto.7"),
+        return [t("howto.1"), t("howto.2"), t("howto.3"), t("howto.4"), t("howto.5"), t("howto.dodge"), t("howto.6"), t("howto.7"),
                 t("howto.8", lives=START_LIVES, hp=MAX_HP), t("howto.9", repair=LEVEL_CLEAR_REPAIR)]
 
     def handle_event(self, event):
@@ -212,7 +212,7 @@ class HowToPlay(BackdropScene):
         surf.blit(title, title.get_rect(center=(WIDTH // 2, 64)))
         panel(surf, (50, 118, WIDTH - 100, 400))
         for i, line in enumerate(self.lines()):
-            text(surf, line, 27, (225, 235, 250), (74, 136 + i * 41))
+            text(surf, line, 27, (225, 235, 250), (74, 132 + i * 38))
         panel(surf, (50, 530, WIDTH - 100, 118))
         text(surf, t("howto.keys"), 27, (255, 232, 130), (WIDTH // 2, 556), "center")
         text(surf, t("howto.saved1"), 27, (190, 220, 255), (WIDTH // 2, 592), "center")
@@ -389,12 +389,13 @@ class LevelSummary(BackdropScene):
             (t("summary.wrong"), f"{s.wrong}", (235, 240, 255), False),
             (t("summary.destroyed"), f"{s.destroyed}", (235, 240, 255), False),
             (t("summary.missed"), f"{s.missed}", (235, 240, 255), False),
+            (t("summary.dodged"), f"{s.dodged} / {s.attacks}", (235, 240, 255), False),
             (t("summary.hits"), f"{s.hits_taken}", (235, 240, 255), False),
             (t("summary.level_score"), f"{s.score:,}", (255, 240, 150), False),
             (t("summary.total_score"), f"{self.session.score:,}", (255, 240, 150), False),
         ]
         for i, (label, value, col, best) in enumerate(rows):
-            y = 262 + i * 37
+            y = 258 + i * 34
             text(surf, label, 32, (190, 210, 235), (210, y), "midleft")
             text(surf, value, 34, col, (WIDTH - 210, y), "midright")
             if best:

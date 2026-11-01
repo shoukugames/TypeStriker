@@ -121,7 +121,8 @@ def _build_effects():
         "boss_hit": _mix(v(0.25, 200, 70, "square", 0.4, 3), nz(0.25, 0.6, 0.6, 0.1)),
         "boss_explode": _mix(nz(1.8, 0.8, 0.5, 0.02, 2.5), v(1.8, 170, 22, "saw", 0.4, 2),
                              _delay(nz(0.7, 0.7, 0.4, 0.05, 3, seed=8), 0.35)),
-        "enemy_shot": v(0.08, 620, 300, "triangle", 0.11, 3),
+        "enemy_shot": _seq(v(0.09, 880, None, "square", 0.17, 1), v(0.13, 660, None, "square", 0.17, 2)),
+        "dodge": _mix(nz(0.3, 0.12, 0.3, 0.7, 3, seed=6), v(0.3, 500, 1500, "sine", 0.2, 3)),
         # Jingles
         "level_clear": _seq(*[v(0.13, f, None, "square", 0.25, 2)
                               for f in (523, 659, 784, 1047)], v(0.45, 1319, None, "square", 0.25, 3)),

@@ -276,16 +276,19 @@ class Bag:
         """Take the next item, preferring one whose first letter is not in avoid_first."""
         if not self.pile:
             self._refill()
-        choice = None
-        for candidate in self.pile:
-            if candidate[0] not in avoid_first:
-                choice = candidate
-                break
+        choice = self._first_allowed(avoid_first)
         if choice is None:
-            choice = self.pile[0]
+            # What's left all clashes, so deal the next shuffle behind it
+            left = list(self.pile)
+            self._refill()
+            self.pile = deque(left + [i for i in self.pile if i not in left])
+            choice = self._first_allowed(avoid_first) or self.pile[0]
         self.pile.remove(choice)
         self.recent.append(choice)
         return choice
+
+    def _first_allowed(self, avoid_first):
+        return next((c for c in self.pile if c[0] not in avoid_first), None)
 
 
 class WordDealer:

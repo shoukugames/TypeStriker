@@ -10,7 +10,7 @@ from .config import (BOSS_BONUS, BOSS_SHOTS, HEIGHT, INVULNERABLE_TIME, LEVEL_CL
                      LEVELS, MAX_HP, POINTS_PER_LETTER, RAIL_Y, START_LIVES, TOP_BAR_H, WIDTH,
                      describe_challenge)
 from .effects import Effects
-from .entities import PLAYER_HIT_RADIUS, Boss, Bullet, Player, Shot, Target
+from .entities import FIRE_WEIGHTS, PLAYER_HIT_RADIUS, Boss, Bullet, Player, Shot, Target, Volley
 from .i18n import t
 from .ui import MenuList, draw_plate, fancy_title, font, text
 from .words import WordDealer
@@ -33,6 +33,8 @@ class LevelStats:
         self.destroyed = 0
         self.missed = 0
         self.hits_taken = 0
+        self.attacks = 0
+        self.dodged = 0
         self.score = 0
         self.completed = False
 
@@ -55,6 +57,7 @@ class Session:
     def __init__(self, start_level=1, seed=None):
         self.rng = random.Random(seed)
         self.dealer = WordDealer(self.rng)
+        self.dodge_dealer = WordDealer(self.rng)  # dodging must not use up the words for enemies
         self.level_index = start_level - 1
         self.score = 0
         self.lives = START_LIVES
@@ -111,7 +114,9 @@ class PlayScene:
         self.book = app.book
         self.player = Player(self.book.player())
         self.targets = []
-        self.bullets = []
+        self.volleys = []
+        self.dodging = None     # the shot whose letters are being typed
+        self.attack_clock = 1.5
         self.shots = []
         self.boss = None
         self.locked = None
@@ -149,7 +154,11 @@ class PlayScene:
             if event.key == pygame.K_ESCAPE:
                 self.set_paused(True)
             elif event.key == pygame.K_BACKSPACE:
-                self._release_lock()
+                if self.dodging is not None:
+                    self.dodging.typed = 0
+                    self.dodging = None
+                else:
+                    self._release_lock()
             else:
                 char = (event.unicode or "").lower()
                 if len(char) != 1 or not "a" <= char <= "z":
@@ -185,16 +194,35 @@ class PlayScene:
             items.append(self.boss)
         return items
 
+    def threats(self):
+        """Shots that will hit unless dodged, the most urgent first."""
+        return sorted((v for v in self.volleys if v.is_threat), key=lambda v: v.time_left)
+
     def press(self, char):
         if not self.can_type():
+            return
+        if self.dodging is not None:
+            if self.dodging.next_letter == char:
+                self._dodge_key(self.dodging)
+            else:
+                self.dodging.shake = 0.5
+                self._wrong_key()
             return
         target = self.locked
         if target is not None and (not target.alive or target.doomed):
             target = self.locked = None
+        # The word in progress goes first, so a shared letter never loses any typing
+        if target is None or target.next_letter != char:
+            for volley in self.threats():
+                if volley.next_letter == char:
+                    self._dodge_key(volley)
+                    return
         if target is None:
             available = self.typeable()
             if not available:
-                return  # nothing to shoot at, so a stray key costs nothing
+                if self.threats():
+                    self._wrong_key()
+                return  # nothing to type at all, so a stray key costs nothing
             for candidate in available:
                 if candidate.next_letter == char:
                     target = candidate
@@ -217,21 +245,38 @@ class PlayScene:
         self.streak = 0
         self.app.audio.play("wrong", 0.7)
 
-    def _correct_key(self, target):
+    def _score_letter(self, item):
         self.stats.correct += 1
         self.streak += 1
         self.best_streak = max(self.best_streak, self.streak)
         self.session.score += POINTS_PER_LETTER
         self.stats.score += POINTS_PER_LETTER
-        target.typed += 1
+        item.typed += 1
+        popup_pos = item.plate_rect().midtop
+        self.effects.popup(popup_pos[0], popup_pos[1] - 12,
+                           font(30).render(f"+{POINTS_PER_LETTER}", True, (255, 240, 130)))
+        if self.streak % 25 == 0:
+            self.effects.popup(WIDTH / 2, 150, font(44).render(f"{self.streak} IN A ROW!", True, (130, 255, 190)), 1.3)
+
+    def _dodge_key(self, volley):
+        self._score_letter(volley)
+        if volley.typed < len(volley.text):
+            self.dodging = volley
+            self.app.audio.play("lock", 0.5)
+            return
+        self.dodging = None
+        volley.dodged = True
+        self.stats.dodged += 1
+        self.player.dodge(volley.time_left + 0.25)
+        self.effects.popup(self.player.x, self.player.y - 70, font(40).render("DODGE!", True, (130, 255, 190)), 0.9)
+        self.effects.ring(self.player.x, self.player.y, 70, (130, 255, 190))
+        self.app.audio.play("dodge")
+
+    def _correct_key(self, target):
+        self._score_letter(target)
         nose = self.player.nose()
         self.player.recoil = 5
         self.effects.spark(nose[0], nose[1], (130, 215, 255), 4, 90, 0.16, 5)
-        popup_pos = target.plate_rect().midtop
-        self.effects.popup(popup_pos[0], popup_pos[1] - 12,
-                           font(30).render(f"+{POINTS_PER_LETTER}", True, (255, 240, 130)))
-        if self.streak and self.streak % 25 == 0:
-            self.effects.popup(WIDTH / 2, 150, font(44).render(f"{self.streak} IN A ROW!", True, (130, 255, 190)), 1.3)
         if target is self.boss:
             self._boss_key(target, nose)
             return
@@ -248,7 +293,7 @@ class PlayScene:
             self.app.audio.play("charge_shot")
             self._release_lock()
             if not boss.doomed:
-                boss.new_word()
+                boss.new_word(self._letters_in_use())
         else:
             self.shots.append(Shot(nose[0], nose[1], _Chip(boss)))
             self.app.audio.play("laser")
@@ -272,7 +317,7 @@ class PlayScene:
         if self.state not in ("intro", "outro"):
             self.session.time += dt
             self.stats.time += dt
-        if self.can_type() and self.typeable():
+        if self.can_type() and (self.typeable() or self.threats()):
             self.stats.active_time += dt
         self.background.update(dt)
         aim = None
@@ -287,9 +332,10 @@ class PlayScene:
         self.player.update(dt, aim)
         self._update_state(dt)
         self._update_targets(dt)
+        self._update_attacks(dt)
         self._update_boss(dt)
         self._update_shots(dt)
-        self._update_bullets(dt)
+        self._update_volleys(dt)
         ground = self.level.speed if self.background.ground else 0.0
         self.effects.update(dt, ground)
         self.damage_flash = max(0.0, self.damage_flash - dt * 2.4)
@@ -301,7 +347,7 @@ class PlayScene:
                 self.set_state("wave")
         elif state == "wave":
             self._spawn(dt)
-            if self.spawned >= self.level.targets and not self.targets:
+            if self.spawned >= self.level.targets and not self.targets and not self.volleys:
                 self.set_state("warning")
                 self.app.audio.stop_music()
                 self.app.audio.play("boss_warning")
@@ -323,7 +369,6 @@ class PlayScene:
                 self.effects.big_blast(self.boss.x - 60, self.boss.y + 20, (255, 170, 80))
                 self.effects.big_blast(self.boss.x + 60, self.boss.y - 20, (255, 240, 180))
                 self.boss = None
-                self.bullets = []
                 self.app.audio.play("level_clear")
                 self.set_state("outro")
         elif state == "outro":
@@ -348,8 +393,7 @@ class PlayScene:
         self.spawn_clock = self.level.spawn_interval * self.rng.uniform(0.85, 1.15)
         kinds = list(self.level.weights)
         kind = self.rng.choices(kinds, [self.level.weights[k] for k in kinds])[0]
-        avoid = {t.next_letter for t in active}
-        word = self.session.dealer.deal(self.level.word_length, avoid)
+        word = self.session.dealer.deal(self.level.word_length, self._letters_in_use())
         # Pick the entry point farthest from whatever just arrived
         recent = [t.x for t in self.targets if t.y < 220]
         margin = 40 + len(word) * 10
@@ -362,14 +406,57 @@ class PlayScene:
         self.targets.append(Target(kind, word, best, self.level, self.book, self.rng, self.player.x))
         self.spawned += 1
 
-    def _spawn_bullet(self, x, y, vx, vy, shell=False, boss=False):
+    def _letters_in_use(self):
+        """Letters that would be ambiguous as the start of something new."""
+        used = {t.next_letter for t in self.targets if not t.doomed}
+        used.update(v.next_letter for v in self.threats())
+        if self.boss is not None:
+            used.add(self.boss.next_letter)
+        if self.locked is not None:
+            used.update(self.locked.text[self.locked.typed:])
+        used.discard("")
+        return used
+
+    def fire_volley(self, x, y, spread=(), shell=False, boss=False):
+        """An enemy opens fire. Returns False when the ship already has enough to dodge."""
+        level = self.level
+        if len(self.threats()) >= level.max_threats:
+            return False
+        flight = level.reaction_time
+        aim_x, aim_y = self.player.x_at(flight), self.player.y
+        angle = math.atan2(aim_y - y, aim_x - x)
+        speed = math.hypot(aim_x - x, aim_y - y) / flight
         key = "boss" if boss else ("shell" if shell else "enemy")
-        self.bullets.append(Bullet(x, y, vx, vy, self.bullet_sprites[key], 7 if boss else 5))
-        self.app.audio.play("enemy_shot", 0.5)
+        sprite, radius = self.bullet_sprites[key], 7 if boss else 5
+        lead = Bullet(x, y, math.cos(angle) * speed, math.sin(angle) * speed, sprite, radius)
+        others = [Bullet(x, y, math.cos(angle + a) * speed, math.sin(angle + a) * speed, sprite, radius)
+                  for a in spread]
+        word = self.session.dodge_dealer.deal(level.dodge_length, self._letters_in_use())
+        self.volleys.append(Volley(word, flight, lead, others))
+        self.stats.attacks += 1
+        self.effects.spark(x, y, (255, 150, 120), 6, 120, 0.2, 5)
+        self.app.audio.play("enemy_shot")
+        return True
+
+    def _update_attacks(self, dt):
+        """The enemies take turns firing, so the ship is under steady attack."""
+        if self.state != "wave":
+            return
+        self.attack_clock -= dt
+        if self.attack_clock > 0:
+            return
+        # Once an attack is due, the next enemy in range fires the moment it can,
+        # which is before anyone could type its letter
+        shooters = [t for t in self.targets if t.can_fire]
+        if not shooters or len(self.threats()) >= self.level.max_threats:
+            return
+        self.attack_clock = self.level.fire_interval * self.rng.uniform(0.8, 1.2)
+        shooter = self.rng.choices(shooters, [FIRE_WEIGHTS[t.kind] for t in shooters])[0]
+        self.fire_volley(shooter.x, shooter.y + shooter.half_h * 0.6, shell=shooter.kind == "tank")
 
     def _update_targets(self, dt):
         for target in self.targets:
-            target.update(dt, self.player, self._spawn_bullet)
+            target.update(dt, self.player)
             if target.kind == "missile" and self.rng.random() < 0.7:
                 rad = target.heading
                 self.effects.trail(target.x - math.cos(rad) * 34, target.y - math.sin(rad) * 34,
@@ -441,7 +528,7 @@ class PlayScene:
         session.lives -= 1
         self.effects.big_blast(self.player.x, self.player.y, (255, 160, 70))
         self.app.audio.play("life_lost")
-        self.bullets = []
+        self._clear_attacks()
         self._release_lock()
         if session.lives > 0:
             session.hp = MAX_HP
@@ -454,7 +541,7 @@ class PlayScene:
 
     def _update_boss(self, dt):
         if self.boss is not None:
-            self.boss.update(dt, self.player, self._spawn_bullet)
+            self.boss.update(dt, self.fire_volley)
 
     def _update_shots(self, dt):
         for shot in self.shots:
@@ -493,7 +580,7 @@ class PlayScene:
 
     def _boss_defeated(self, boss):
         boss.dying = True
-        self.bullets = []
+        self._clear_attacks()
         self.stats.destroyed += 1
         self.session.score += BOSS_BONUS
         self.stats.score += BOSS_BONUS
@@ -502,21 +589,28 @@ class PlayScene:
         self.app.audio.play("boss_explode")
         self.set_state("boss_death")
 
-    def _update_bullets(self, dt):
+    def _clear_attacks(self):
+        self.volleys = []
+        self.dodging = None
+
+    def _update_volleys(self, dt):
         px, py = self.player.x, self.player.y
-        for bullet in self.bullets:
-            bullet.update(dt)
         hit_any = False
-        keep = []
-        for bullet in self.bullets:
-            if bullet.gone:
+        for volley in self.volleys:
+            volley.update(dt, self.player)
+            if not volley.is_threat or self.state == "dying":
                 continue
-            if self.state != "dying" and math.hypot(bullet.x - px, bullet.y - py) < bullet.radius + PLAYER_HIT_RADIUS:
-                hit_any = True
-                self.effects.spark(bullet.x, bullet.y, (255, 200, 150), 6, 140, 0.25, 5)
-                continue
-            keep.append(bullet)
-        self.bullets = keep
+            for bullet in volley.bullets:
+                if math.hypot(bullet.x - px, bullet.y - py) < bullet.radius + PLAYER_HIT_RADIUS:
+                    # One attack costs one hit, however many of its bullets arrive
+                    hit_any = True
+                    volley.spent = True
+                    volley.bullets.remove(bullet)
+                    self.effects.spark(bullet.x, bullet.y, (255, 200, 150), 6, 140, 0.25, 5)
+                    if self.dodging is volley:
+                        self.dodging = None
+                    break
+        self.volleys = [v for v in self.volleys if v.bullets]
         if hit_any:
             self.hurt()
 
@@ -554,8 +648,10 @@ class PlayScene:
                 target.draw(world)
         if self.boss:
             self.boss.draw(world)
-        for bullet in self.bullets:
-            bullet.draw(world)
+        self._draw_danger_lines(world)
+        for volley in self.volleys:
+            for bullet in volley.bullets:
+                bullet.draw(world)
         self.player.draw(world)
         for shot in self.shots:
             shot.draw(world)
@@ -574,6 +670,19 @@ class PlayScene:
         self._draw_banners(surf)
         if self.paused:
             self._draw_pause(surf)
+
+    def _draw_danger_lines(self, surf):
+        """A dashed line from each incoming shot to the ship."""
+        px, py = self.player.x, self.player.y
+        for volley in self.threats():
+            bx, by = volley.lead.x, volley.lead.y
+            length = math.hypot(px - bx, py - by)
+            if length < 1:
+                continue
+            ux, uy = (px - bx) / length, (py - by) / length
+            for d in range(int(self.time * 120) % 26, int(length), 26):
+                pygame.draw.line(surf, (235, 70, 60), (bx + ux * d, by + uy * d),
+                                 (bx + ux * (d + 11), by + uy * (d + 11)), 2)
 
     def _draw_rail(self, surf):
         y = RAIL_Y + 50
@@ -605,6 +714,15 @@ class PlayScene:
         if boss and not boss.dying and boss.arrived and not boss.doomed:
             draw_plate(surf, boss.plate_rect(), boss.text, boss.typed, boss.locked, False,
                        math.sin(boss.shake * 40) * 6 * boss.shake if boss.shake else 0.0, boss=True)
+        # Shots go on top of everything, and never hide one another
+        taken = []
+        for volley in reversed(self.threats()):
+            rect = volley.plate_rect()
+            while rect.collidelist(taken) >= 0:
+                rect.y -= rect.height + 4
+            taken.append(rect)
+            draw_plate(surf, rect, volley.text, volley.typed,
+                       nudge=math.sin(volley.shake * 40) * 6 * volley.shake if volley.shake else 0.0, threat=True)
 
     def _draw_reticle(self, surf, x, y, r):
         spin = self.time * 3

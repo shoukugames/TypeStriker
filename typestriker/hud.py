@@ -1,9 +1,11 @@
 """In-game display: score and timer on top, hull and lives at the bottom left."""
+import math
+
 import pygame
 
 from . import art
 from .config import BOSS_SHOTS, HEIGHT, MAX_HP, TOP_BAR_H, WIDTH
-from .ui import panel, text, vertical_gradient, wrap_bar
+from .ui import glyph, panel, text, vertical_gradient, wrap_bar
 
 _cache = {}
 
@@ -33,6 +35,35 @@ def _hp_color(i):
     if t < 0.5:
         return art.mix((240, 60, 50), (250, 200, 60), t * 2)
     return art.mix((250, 200, 60), (70, 230, 110), (t - 0.5) * 2)
+
+
+def _draw_incoming(surf, scene):
+    """A fixed place to read what to type, so nobody has to chase a moving shot."""
+    threats = scene.threats()
+    if not threats:
+        return
+    widths = [len(v.text) * 19 + 16 for v in threats]
+    label = 142
+    total = label + sum(widths) + 8 * (len(widths) - 1) + 24
+    x = WIDTH // 2 + 8 - total // 2
+    y = HEIGHT - 76
+    pulse = int(40 * abs(math.sin(scene.time * 6)))
+    panel(surf, (x, y, total, 40), (60 + pulse, 8, 12), 225, (255, 110 + pulse, 90), 9)
+    text(surf, "DODGE! TYPE", 25, (255, 236, 130), (x + 12, y + 20), "midleft")
+    chip_x = x + 12 + label
+    for volley, width in zip(threats, widths):
+        chip = pygame.Rect(chip_x, y + 4, width, 25)
+        pygame.draw.rect(surf, (186, 26, 30), chip, border_radius=5)
+        pygame.draw.rect(surf, (255, 236, 130), chip, 2, border_radius=5)
+        for i, char in enumerate(volley.text.upper()):
+            color = (246, 150, 140) if i < volley.typed else (255, 255, 255)
+            image = glyph(char, 28, color)
+            surf.blit(image, image.get_rect(center=(chip.x + 8 + i * 19 + 9.5, chip.centery + 1)))
+        # The bar empties as the shot closes in
+        left = volley.time_left / volley.flight
+        color = (255, 236, 130) if left > 0.35 else (255, 80, 60)
+        pygame.draw.rect(surf, color, (chip.x, y + 31, int(width * left), 5), border_radius=2)
+        chip_x += width + 8
 
 
 def draw_hud(surf, scene):
@@ -89,6 +120,7 @@ def draw_hud(surf, scene):
     acc = f"{stats.accuracy:.0f}%" if stats.correct + stats.wrong else "--"
     text(surf, speed, 26, (150, 240, 255), (x + 12, HEIGHT - 39))
     text(surf, acc, 26, (180, 255, 180), (x + 178, HEIGHT - 39), "topright")
-    if scene.locked is not None:
+    _draw_incoming(surf, scene)
+    if scene.locked is not None or scene.dodging is not None:
         panel(surf, (WIDTH // 2 - 50, HEIGHT - 38, 220, 26), (8, 12, 28), 190, None, 7)
-        text(surf, "BACKSPACE: change target", 21, (240, 225, 160), (WIDTH // 2 + 60, HEIGHT - 25), "center")
+        text(surf, "BACKSPACE: start again" if scene.dodging is not None else "BACKSPACE: change target", 21, (240, 225, 160), (WIDTH // 2 + 60, HEIGHT - 25), "center")

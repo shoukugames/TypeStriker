@@ -101,12 +101,15 @@ def fancy_title(string, size, top=(255, 255, 255), bottom=(70, 170, 255), glow=(
 PLATE_NORMAL = ((10, 16, 36), (110, 170, 240))
 PLATE_LOCKED = ((40, 26, 6), (255, 210, 90))
 PLATE_DANGER = ((54, 10, 18), (255, 90, 90))
+PLATE_THREAT = ((186, 26, 30), (255, 236, 130))
 
 
-def draw_plate(surf, rect, string, typed, locked=False, danger=False, nudge=0.0, boss=False):
+def draw_plate(surf, rect, string, typed, locked=False, danger=False, nudge=0.0, boss=False, threat=False):
     """The tile behind an enemy that shows what to type next."""
     rect = pygame.Rect(rect)
     fill, border = PLATE_LOCKED if locked else (PLATE_DANGER if danger else PLATE_NORMAL)
+    if threat:
+        fill, border = PLATE_THREAT
     if nudge:
         rect.x += int(nudge)
     pygame.draw.rect(surf, (0, 0, 0), rect.move(2, 3), border_radius=9)
@@ -118,7 +121,7 @@ def draw_plate(surf, rect, string, typed, locked=False, danger=False, nudge=0.0,
     y = rect.centery + 1
     for i, char in enumerate(string.upper()):
         if i < typed:
-            color = (84, 110, 104)
+            color = (246, 150, 140) if threat else (84, 110, 104)
         elif i == typed:
             color = (255, 232, 90) if len(string) > 1 else (255, 255, 255)
         else:

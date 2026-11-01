@@ -21,13 +21,13 @@ Download a release, or [build it yourself](#build-the-installers).
 **Linux (Debian, Ubuntu and similar, 64-bit):**
 
 ```bash
-sudo apt install ./typestriker_v0.1.0_amd64.deb
+sudo apt install ./typestriker_v0.1.1_amd64.deb
 ```
 
 Start it from your applications menu or by running `typestriker`.
 To remove it: `sudo apt remove typestriker`.
 
-**Windows (64-bit):** double-click `TypeStriker-v0.1.0.exe`. Nothing needs installing.
+**Windows (64-bit):** double-click `TypeStriker-v0.1.1.exe`. Nothing needs installing.
 The first start takes a few seconds while it unpacks. Windows SmartScreen may warn about
 an unsigned download; choose **More info**, then **Run anyway**.
 
@@ -43,8 +43,8 @@ python3 -m venv .venv
 
 | Key | Action |
 |---|---|
-| Letters A-Z | Fire at the matching enemy (capitals and lowercase both work) |
-| Backspace | Drop your current target and pick another |
+| Letters A-Z | Fire at the matching enemy, or dodge the matching shot (capitals and lowercase both work) |
+| Backspace | Drop your current target and pick another, or restart a dodge you began |
 | Esc | Pause |
 | F11 | Full screen on or off |
 | F2 | Mute or unmute |
@@ -56,8 +56,13 @@ python3 -m venv .venv
 - **Target lock:** once you start a word your ship stays locked on it until it is finished.
 - **Bosses:** every boss takes exactly **10 shots**. Each shot is fired by finishing one letter
   (levels 1-3) or one whole word (levels 4-10), and the letters along the way score as usual.
-- **Damage:** you have **3 lives**, each with a **10-hit** hull bar. Each enemy shot or crash
-  costs one hit. Clearing a level repairs 3 hull points.
+- **Dodging:** enemies and bosses fire back, and a shot always lands unless you dodge it. Each shot
+  carries a red tag, also shown at the bottom of the screen with a timer bar. Type the tag and your
+  ship rolls out of the way. Tags are one letter on levels 1-3, two on levels 4-6 and three on
+  levels 7-10, and each letter scores 100. A dodge pauses the word you are typing, which carries on
+  afterwards from where you stopped. Asteroids and missiles don't shoot: stop those by shooting them.
+- **Damage:** you have **3 lives**, each with a **10-hit** hull bar. Each enemy attack that lands
+  or crash costs one hit. Clearing a level repairs 3 hull points.
 - **Speed** is shown in words per minute, counting 5 letters as a word. Only time with something
   on screen to type at is counted, so waiting for enemies doesn't lower it.
 - **Accuracy** is correct keys out of all keys pressed while there was something to shoot at.
@@ -133,6 +138,8 @@ python3 -m venv .venv
 
 ## Changelog
 
+- **v0.1.1**: Enemies now fire steadily, and you type the red tag on each shot to dodge it. Added
+  attacks dodged to the level results.
 - **v0.1.0**: First release. Ten levels and bosses, Top 10, per-level progress, and English and
   Japanese menus, instructions and credits.
 

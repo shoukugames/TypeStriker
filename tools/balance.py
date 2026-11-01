@@ -25,7 +25,7 @@ def play(app, cps, seed, limit_minutes=60):
     session = Session(seed=seed)
     app.switch(PlayScene(app, session))
     rng = random.Random(seed)
-    bot = Autoplayer(cps, 0.08 if cps else 0, rng) if cps else None
+    bot = Autoplayer(cps, 0.08, rng, dodge_rate=0.8, notice_time=0.5) if cps else None
     for _ in range(int(limit_minutes * 3600)):
         scene = app.scene
         if isinstance(scene, PlayScene):
@@ -55,7 +55,7 @@ def main():
                 hits.setdefault(stats.number, []).append(stats.hits_taken)
         mins = [round(s.time / 60, 1) for s in rows]
         print(f"{cps:4.1f} cps ({cps * 12:3.0f} wpm)  reached {reached}  minutes {mins}  "
-              f"score {rows[0].score:>7}  hits/level "
+              f"score {rows[0].score:>7}  attacks/level {sum(x.attacks for x in rows[0].levels) // len(rows[0].levels)}  hits/level "
               + " ".join(f"{sum(v) / len(v):.0f}" for _, v in sorted(hits.items())), flush=True)
 
 
