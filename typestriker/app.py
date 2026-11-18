@@ -5,7 +5,7 @@ import sys
 import time
 import traceback
 
-from . import __version__
+from . import WEB, __version__
 
 
 def _quiet_console():
@@ -52,6 +52,17 @@ class App:
         self._vignette = None
         self._backdrop = None
         self._veil = None
+        # Phones and tablets: the device keyboard for typing words, plus Esc / Backspace / Enter (webkeys.py).
+        self.webkeys = None
+        if WEB:
+            from .webkeys import WebKeys, has_touch_screen
+            if has_touch_screen():
+                from . import scenes
+                scenes.TOUCH = True
+                try:
+                    self.webkeys = WebKeys(keys=["Escape", "Backspace", "Enter"], keyboard=True, text_as_keys=True)
+                except Exception:  # noqa: BLE001 - the game still works with a keyboard
+                    self.webkeys = None
 
     def _set_icon(self):
         try:
@@ -60,6 +71,9 @@ class App:
             pass
 
     def _apply_mode(self):
+        if WEB:  # a fixed-size canvas; the page scales it to fit the browser window
+            self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+            return
         flags = pygame.SCALED
         if self.settings.get("fullscreen"):
             flags |= pygame.FULLSCREEN
@@ -117,7 +131,7 @@ class App:
         self.scene = scene
 
     def quit(self):
-        self.running = False
+        self.running = WEB  # in a browser there is nothing to quit to
 
     @staticmethod
     def _pill_rect():
@@ -127,9 +141,10 @@ class App:
 
     def dispatch(self, event):
         if event.type == pygame.QUIT:
-            self.running = False
+            self.running = WEB  # in a browser there is nothing to quit to
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_F11:
-            self.toggle_fullscreen()
+            if not WEB:
+                self.toggle_fullscreen()
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_F2:
             self.toggle_mute()
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_F3:
@@ -154,13 +169,29 @@ class App:
         if self.scene is None:
             self.switch(MainMenu(self))
         while self.running:
-            dt = min(self.clock.tick(FPS) / 1000.0, 0.05)
-            for event in pygame.event.get():
-                self.dispatch(event)
-            self.step(dt)
-            pygame.display.flip()
+            self.frame()
         storage.save_settings(self.settings)
         pygame.quit()
+
+    def frame(self):
+        dt = min(self.clock.tick(FPS) / 1000.0, 0.05)
+        if self.webkeys:
+            self.webkeys.poll()
+        for event in pygame.event.get():
+            self.dispatch(event)
+        self.step(dt)
+        pygame.display.flip()
+
+    async def run_web(self):
+        """Browser main loop: hands control back to the page after every frame."""
+        import asyncio
+        from .scenes import MainMenu
+        if self.scene is None:
+            self.switch(MainMenu(self))
+        while True:  # a web page has no "quit"; closing the tab ends the game
+            self.running = True
+            self.frame()
+            await asyncio.sleep(0)
 
 
 def _smoke_test(path):

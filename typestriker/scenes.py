@@ -5,7 +5,7 @@ import webbrowser
 
 import pygame
 
-from . import __version__, art, storage
+from . import WEB, __version__, art, storage
 from .config import (AUTHOR, EMAIL, HEIGHT, LEVEL_CLEAR_REPAIR, LEVELS, MAX_HP, NAME_LENGTH,
                      START_LIVES, TOP_SCORES, WEBSITE, WIDTH)
 from .effects import Effects
@@ -19,8 +19,13 @@ def _confirm(event):
     return event.type == pygame.KEYDOWN and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE)
 
 
-def _back(event):
+TOUCH = False   # set by App on touch screens: a tap goes back from screens with nothing to click
+
+
+def _back(event, tap=True):
     if event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+        return True
+    if TOUCH and tap and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
         return True
     return event.type == pygame.MOUSEBUTTONDOWN and event.button == 3
 
@@ -49,6 +54,8 @@ class BackdropScene:
 
 class MainMenu(BackdropScene):
     ITEMS = ["menu.start", "menu.top10", "menu.progress", "menu.howto", "menu.about", "menu.options", "menu.quit"]
+    if WEB:  # a web page has nothing to quit to
+        ITEMS = ITEMS[:-1]
 
     def __init__(self, app):
         super().__init__(app)
@@ -230,8 +237,12 @@ class AboutScene(BackdropScene):
     def _open(self, url):
         self.app.audio.play("menu_select")
         try:
-            webbrowser.open(url)
-        except webbrowser.Error:
+            if WEB:
+                import platform  # pygbag's bridge to the page
+                platform.window.open(url, "_blank")
+            else:
+                webbrowser.open(url)
+        except Exception:  # noqa: BLE001 - a browser problem must never stop the game
             pass
 
     def handle_event(self, event):
@@ -242,7 +253,7 @@ class AboutScene(BackdropScene):
             if self.mail_rect.collidepoint(event.pos):
                 self._open(f"mailto:{EMAIL}")
                 return
-        if _back(event):
+        if _back(event, tap=False):  # links are clickable here
             self.app.audio.play("menu_select")
             self.app.switch(MainMenu(self.app))
 
