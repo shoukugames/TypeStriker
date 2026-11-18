@@ -9,6 +9,7 @@ import random
 
 import pygame
 
+from . import WEB
 from .config import MENU_THEME
 
 SAMPLE_RATE = 22050
@@ -145,6 +146,7 @@ def _midi_freq(note):
 
 class Audio:
     def __init__(self, sound_volume=0.8, music_volume=0.5):
+        global SAMPLE_RATE  # the browser may change it (see below)
         self.sound_volume = sound_volume
         self.music_volume = music_volume
         self.enabled = False
@@ -158,6 +160,10 @@ class Audio:
         self.current_key = None
         try:
             pygame.mixer.init(SAMPLE_RATE, -16, 1, 512)
+            if WEB:
+                # Browsers mix at their own rate (48000 Hz): make the sounds at that rate so they keep
+                # their pitch and speed (the synth reads SAMPLE_RATE as it runs).
+                SAMPLE_RATE = pygame.mixer.get_init()[0]
             pygame.mixer.set_num_channels(32)
             pygame.mixer.set_reserved(MUSIC_CHANNELS)
             self.channels = [pygame.mixer.Channel(i) for i in range(MUSIC_CHANNELS)]
