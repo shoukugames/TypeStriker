@@ -4,7 +4,9 @@ Nothing here needs a sound file. If no audio device exists the game carries on
 silently, because every public method checks `self.enabled`.
 """
 import array
+import json
 import math
+import os
 import random
 
 import pygame
@@ -144,6 +146,74 @@ def _midi_freq(note):
     return 440.0 * 2 ** ((note - 69) / 12)
 
 
+# ----- browser build -----
+# A browser runs the game loop far less evenly than a PC, so music notes triggered from the game
+# loop stumble, and making the sounds in Python there takes seconds. The browser build gets every
+# effect, and every theme as one seamless loop, pre-made as .ogg files in web_sounds/ (written by
+# tools/build_web.py with the functions below).
+WEB_SOUNDS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web_sounds")
+
+
+def web_music_name(theme, boss):
+    return f"music_{theme.seed}{'_boss' if boss else ''}"
+
+
+def drum_samples():
+    return {
+        "kick": _voice(0.16, 150, 42, "sine", 0.9, 4),
+        "snare": _mix(_noise(0.14, 0.55, 0.8, curve=5), _voice(0.1, 210, 170, "triangle", 0.25)),
+        "hat": _noise(0.04, 0.3, 1.0, curve=6, seed=9),
+    }
+
+
+class _NoteSamples:
+    """Stands in for Audio when composing offline: notes come back as samples, not Sounds."""
+
+    @staticmethod
+    def _note(midi, wave, dur, curve=3.0, vol=0.5):
+        return _voice(dur, _midi_freq(midi), None, wave, vol, curve, 0.004)
+
+
+def theme_loop(theme, boss):
+    """One theme as a seamless loop, exactly as Audio.update() sequences it: step s sounds at
+    s * step_time, a new sound on a channel cuts off the one before, sounds ring over the loop's
+    end into its start. Channel volumes are baked in; the music volume is applied when playing."""
+    song = Audio._compose(_NoteSamples(), theme, boss)
+    step_time = 60.0 / (theme.bpm + (22 if boss else 0)) / 4
+    n = int(round(len(song) * step_time * SAMPLE_RATE))
+    drums = drum_samples()
+    per_channel = {}
+    for step, events in enumerate(song):
+        for kind, channel, what, volume in events:
+            samples = drums[what] if kind == "drum" else what
+            per_channel.setdefault(channel, {})[step] = (samples, volume)  # same step: the last one wins
+    out = [0.0] * n
+    for hits in per_channel.values():
+        steps = sorted(hits)
+        for j, step in enumerate(steps):
+            samples, volume = hits[step]
+            nxt = steps[j + 1] if j + 1 < len(steps) else steps[0] + len(song)
+            begin = int(round(step * step_time * SAMPLE_RATE))
+            stop = int(round(nxt * step_time * SAMPLE_RATE))
+            for k, v in enumerate(samples[:max(0, stop - begin)]):
+                out[(begin + k) % n] += max(-1.0, min(1.0, v)) * 32000 / 32767 * volume
+    return out
+
+
+def web_jobs():
+    """Everything the browser build needs, as (file name, samples)."""
+    from .config import LEVELS
+    jobs = [("fx_" + name, data) for name, data in _build_effects().items()]
+    themes = [(MENU_THEME, False)] + [(level.music, boss) for level in LEVELS for boss in (False, True)]
+    seen = set()
+    for theme, boss in themes:
+        name = web_music_name(theme, boss)
+        if name not in seen:
+            seen.add(name)
+            jobs.append((name, theme_loop(theme, boss)))
+    return jobs
+
+
 class Audio:
     def __init__(self, sound_volume=0.8, music_volume=0.5):
         global SAMPLE_RATE  # the browser may change it (see below)
@@ -158,6 +228,8 @@ class Audio:
         self.step_time = 0.1
         self.current_theme = None
         self.current_key = None
+        self.web_channel = None
+        self.web_flip = 0
         try:
             pygame.mixer.init(SAMPLE_RATE, -16, 1, 512)
             if WEB:
@@ -167,15 +239,30 @@ class Audio:
             pygame.mixer.set_num_channels(32)
             pygame.mixer.set_reserved(MUSIC_CHANNELS)
             self.channels = [pygame.mixer.Channel(i) for i in range(MUSIC_CHANNELS)]
-            self.effects = {name: _sound(data) for name, data in _build_effects().items()}
-            self.drums = {
-                "kick": _sound(_voice(0.16, 150, 42, "sine", 0.9, 4)),
-                "snare": _sound(_mix(_noise(0.14, 0.55, 0.8, curve=5), _voice(0.1, 210, 170, "triangle", 0.25))),
-                "hat": _sound(_noise(0.04, 0.3, 1.0, curve=6, seed=9)),
-            }
+            if WEB:
+                self.effects = self._load_web_effects()
+                self.drums = {}
+            else:
+                self.effects = {name: _sound(data) for name, data in _build_effects().items()}
+                self.drums = {name: _sound(data) for name, data in drum_samples().items()}
             self.enabled = True
         except pygame.error as error:
             print(f"Audio disabled: {error}")
+
+    @staticmethod
+    def _load_web_effects():
+        effects = {}
+        try:
+            with open(os.path.join(WEB_SOUNDS, "index.json"), encoding="utf-8") as handle:
+                names = json.load(handle)
+        except (OSError, ValueError):
+            return effects
+        for name in names:
+            try:
+                effects[name] = pygame.mixer.Sound(os.path.join(WEB_SOUNDS, f"fx_{name}.ogg"))
+            except (pygame.error, FileNotFoundError):
+                pass
+        return effects
 
     # ---- Effects --------------------------------------------------------
     def play(self, name, volume=1.0):
@@ -192,6 +279,8 @@ class Audio:
 
     def set_music_volume(self, volume):
         self.music_volume = volume
+        if self.web_channel:
+            self.web_channel.set_volume(volume)
 
     # ---- Music ----------------------------------------------------------
     def _note(self, midi, wave, dur, curve=3.0, vol=0.5):
@@ -258,6 +347,16 @@ class Audio:
             return
         self.stop_music()
         self.current_key = key
+        if WEB:  # a pre-made loop (see theme_loop)
+            try:
+                loop = pygame.mixer.Sound(os.path.join(WEB_SOUNDS, web_music_name(theme, boss) + ".ogg"))
+            except (pygame.error, FileNotFoundError):
+                return
+            self.web_channel = self.channels[self.web_flip]
+            self.web_flip ^= 1
+            self.web_channel.set_volume(self.music_volume)
+            self.web_channel.play(loop, loops=-1, fade_ms=300)
+            return
         self.song = self._compose(theme, boss)
         bpm = theme.bpm + (22 if boss else 0)
         self.step_time = 60.0 / bpm / 4
@@ -267,7 +366,10 @@ class Audio:
     def stop_music(self):
         self.song = None
         self.current_key = None
-        if self.enabled:
+        if self.web_channel:
+            self.web_channel.fadeout(300)
+            self.web_channel = None
+        elif self.enabled:
             for channel in self.channels:
                 channel.stop()
 
