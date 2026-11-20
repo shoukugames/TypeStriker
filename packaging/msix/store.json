@@ -1,0 +1,12 @@
+{
+ "_note": "Replace identity_name, publisher and publisher_display_name with the values from Partner Center (Product management -> Product identity) before uploading to the Microsoft Store.",
+ "identity_name": "ShoukuGames.TypeStriker",
+ "publisher": "CN=ShoukuGamesPlaceholder",
+ "publisher_display_name": "Shouku Games",
+ "display_name": "TypeStriker",
+ "description": "A typing space shooter. Type letters and words to blast enemies, then type the red tags to dodge their fire.",
+ "file_name": "TypeStriker",
+ "exe_name": "TypeStriker.exe",
+ "alias": "shouku-typestriker.exe",
+ "device_capabilities": []
+}
